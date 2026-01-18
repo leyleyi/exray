@@ -271,66 +271,6 @@ EOF
 }
 
 # ---------------- MODE 5 ----------------
-mode_vless_relay() {
-    read -rp "请输入SS链接: " SS_LINK
-    t1=${SS_LINK#*://}
-    t2=${t1%#*}
-    info=$(echo ${t2%@*} | base64 -d)
-    SS_METHOD=${info%%:*}
-    SS_PASS=${info#*:}
-    addr_port=${t2#*@}
-    SS_ADDR=${addr_port%:*}
-    SS_PORT=${addr_port#*:}
-
-    read -rp "节点备注: " REMARK
-    read -rp "请输入端口（回车随机）: " PORT
-    PORT=${PORT:-$(port)}
-    UUID=$(uuid)
-    KEYS=$($XRAY_BIN x25519)
-    PRI=$(echo "$KEYS" | grep -i '^PrivateKey' | awk -F ': ' '{print $2}')
-    PBK=$(echo "$KEYS" | grep -i '^Password'   | awk -F ': ' '{print $2}')
-    SID=$(openssl rand -hex 4)
-
-cat > $CONFIG_FILE <<EOF
-{
-  "inbounds": [{
-    "port": $PORT,
-    "protocol": "vless",
-    "settings": {
-      "clients": [{"id": "$UUID", "flow": "xtls-rprx-vision"}],
-      "decryption": "none"
-    },
-    "streamSettings": {
-      "network": "tcp",
-      "security": "reality",
-      "realitySettings": {
-        "dest": "addons.mozilla.org:443",
-        "serverNames": ["addons.mozilla.org"],
-        "privateKey": "$PRI",
-        "shortIds": ["$SID"]
-      }
-    }
-  }],
-  "outbounds": [{
-    "protocol": "shadowsocks",
-    "settings": {
-      "servers": [{
-        "address": "$SS_ADDR",
-        "port": $SS_PORT,
-        "method": "$SS_METHOD",
-        "password": "$SS_PASS"
-      }]
-    }
-  }]
-}
-EOF
-
-    echo "vless://$UUID@$(ip):$PORT?security=reality&encryption=none&pbk=$PBK&fp=chrome&flow=xtls-rprx-vision&sni=addons.mozilla.org&sid=$SID#$REMARK"
-}
-
-
-
-# ---------------- MODE 6 ----------------
 enable_bbr() {
 cat > /etc/sysctl.conf <<'EOF'
 fs.file-max = 6815744
@@ -362,18 +302,18 @@ EOF
 sysctl -p && sysctl --system
 }
 
-# ---------------- MODE 7 ----------------
+# ---------------- MODE 6 ----------------
 service_restart() {
     systemctl restart xray && echo -e "${GREEN}Xray 已重启${PLAIN}"
 }
 
-# ---------------- MODE 8 ----------------
+# ---------------- MODE 7 ----------------
 stop_xray() {
     systemctl strop xray && echo -e "${GREEN}Xray 已停止${PLAIN}"
 
 
 }
-# ---------------- MODE 9 ----------------
+# ---------------- MODE 8 ----------------
 uninstall_xray() {
     systemctl stop xray 2>/dev/null
     systemctl disable xray 2>/dev/null
@@ -409,10 +349,9 @@ case "$M" in
     2) mode_ss ; service_start ;;
     3) mode_trojan ; service_start ;;
     4) mode_ss_relay ; service_start ;;
-    5) mode_vless_relay ; service_start ;;
-    6) enable_bbr ;;
-    7) service_restart ;;
-    8) stop_xray ;;
-    9) uninstall_xray ;;
+    5) enable_bbr ;;
+    6) service_restart ;;
+    7) stop_xray ;;
+    8) uninstall_xray ;;
     0) exit 0 ;;
 esac
