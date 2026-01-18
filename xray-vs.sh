@@ -368,6 +368,12 @@ service_restart() {
 }
 
 # ---------------- MODE 8 ----------------
+stop_xray() {
+    systemctl strop xray && echo -e "${GREEN}Xray 已停止${PLAIN}"
+  
+  
+}
+# ---------------- MODE 9 ----------------
 uninstall_xray() {
     systemctl stop xray 2>/dev/null
     systemctl disable xray 2>/dev/null
@@ -392,7 +398,8 @@ echo "4) Shadowsocks → VLESS Reality"
 echo "5) VLESS Reality → VLESS Reality"
 echo "6) 开启 BBR 加速"
 echo "7) 重启 Xray"
-echo "8) 卸载 Xray"
+echo "8) 停止 Xray"
+echo "9) 卸载 Xray"
 echo "0) 退出"
 read -rp "> " M
 
@@ -405,6 +412,7 @@ case "$M" in
     5) mode_vless_relay ; service_start ;;
     6) enable_bbr ;;
     7) service_restart ;;
-    8) uninstall_xray ;;
+    8) stop_xray ;;
+    9) uninstall_xray ;;
     0) exit 0 ;;
 esac
