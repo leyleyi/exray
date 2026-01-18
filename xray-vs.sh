@@ -108,7 +108,9 @@ parse_vless() {
 
 # ---------------- MODE 1 ----------------
 mode_vless() {
-    PORT=$(port)
+    read -rp "节点备注: " REMARK
+    read -rp "请输入端口（回车随机）: " PORT
+    PORT=${PORT:-$(port)}
     UUID=$(uuid)
     KEYS=$($XRAY_BIN x25519)
     read -rp "节点备注: " REMARK
@@ -145,8 +147,9 @@ EOF
 
 # ---------------- MODE 2 ----------------
 mode_ss() {
-    PORT=$(port)
     read -rp "节点备注: " REMARK
+    read -rp "请输入端口（回车随机）: " PORT
+    PORT=${PORT:-$(port)}
     PASS=$(openssl rand -base64 16 2>/dev/null | tr -d '\n\r') || pass=$(head -c 16 /dev/urandom | base64 2>/dev/null | tr -d '\n\r')
 
 cat > $CONFIG_FILE <<EOF
@@ -169,12 +172,13 @@ EOF
 
 # ---------------- MODE 3 ----------------
 mode_trojan() {
-    PORT=$(port)
     read -rp "节点备注: " REMARK
+    read -rp "请输入端口（回车随机）: " PORT
+    PORT=${PORT:-$(port)}
     PASSWORD=$(openssl rand -hex 8)
     KEYS=$($XRAY_BIN x25519)
-    PRIVATE_KEY=$(echo "$KEYS" | awk '/PrivateKey:/ {print $2}')
-    PUB_KEY=$(echo "$KEYS" | awk '/Password/ {print $2}')
+    PRIVATE_KEY=$(echo "$KEYS" | awk '/Private key/ {print $3}')
+    PUB_KEY=$(echo "$KEYS"  | awk '/Public key/  {print $3}')
     read -rp "请输入 Reality SNI（默认 addons.mozilla.org）: " SNI
     SNI=${SNI:-addons.mozilla.org}
     SHORT_ID=$(openssl rand -hex 8)
@@ -215,7 +219,8 @@ mode_ss_relay() {
     read -rp "输入 vless:// 链接: " LINK
     parse_vless "$LINK"
     read -rp "节点备注: " REMARK
-    PORT=$(port)
+    read -rp "请输入端口（回车随机）: " PORT
+    PORT=${PORT:-$(port)}
     PASS=$(openssl rand -base64 16 2>/dev/null | tr -d '\n\r') || pass=$(head -c 16 /dev/urandom | base64 2>/dev/null | tr -d '\n\r')
 
 cat > $CONFIG_FILE <<EOF
@@ -264,7 +269,8 @@ mode_vless_relay() {
     read -rp "请输入目标 VLESS Reality Vision 链接: " LINK
     parse_vless "$LINK"
     read -rp "节点备注: " REMARK
-    PORT=$(port)
+    read -rp "请输入端口（回车随机）: " PORT
+    PORT=${PORT:-$(port)}
     UUID=$(uuid)
     KEYS=$($XRAY_BIN x25519)
     PRI=$(awk '/Private/{print $3}' <<<"$KEYS")
