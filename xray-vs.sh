@@ -222,7 +222,7 @@ EOF
 
 # ---------------- MODE 4 ----------------
 mode_ss_relay() {
-    read -rp "输入 vless:// 链接: " LINK
+    read -rp "输入Vless链接: " LINK
     parse_vless "$LINK"
     read -rp "节点备注: " REMARK
     read -rp "请输入端口（回车随机）: " PORT
@@ -272,8 +272,16 @@ EOF
 
 # ---------------- MODE 5 ----------------
 mode_vless_relay() {
-    read -rp "请输入目标 VLESS Reality Vision 链接: " LINK
-    parse_vless "$LINK"
+    read -rp "请输入SS链接: " SS_LINK
+    t1=${SS_LINK#*://}
+    t2=${t1%#*}
+    info=$(echo ${t2%@*} | base64 -d)
+    SS_METHOD=${info%%:*}
+    SS_PASS=${info#*:}
+    addr_port=${t2#*@}
+    SS_ADDR=${addr_port%:*}
+    SS_PORT=${addr_port#*:}
+
     read -rp "节点备注: " REMARK
     read -rp "请输入端口（回车随机）: " PORT
     PORT=${PORT:-$(port)}
@@ -285,45 +293,33 @@ mode_vless_relay() {
 
 cat > $CONFIG_FILE <<EOF
 {
-  "inbounds":[{
-    "port":$PORT,
-    "protocol":"vless",
-    "settings":{
-      "clients":[{"id":"$UUID","flow":"xtls-rprx-vision"}],
-      "decryption":"none"
+  "inbounds": [{
+    "port": $PORT,
+    "protocol": "vless",
+    "settings": {
+      "clients": [{"id": "$UUID", "flow": "xtls-rprx-vision"}],
+      "decryption": "none"
     },
-    "streamSettings":{
-      "network":"tcp",
-      "security":"reality",
-      "realitySettings":{
-        "dest":"addons.mozilla.org:443",
-        "serverNames":["addons.mozilla.org"],
-        "privateKey":"$PRI",
-        "shortIds":["$SID"]
+    "streamSettings": {
+      "network": "tcp",
+      "security": "reality",
+      "realitySettings": {
+        "dest": "addons.mozilla.org:443",
+        "serverNames": ["addons.mozilla.org"],
+        "privateKey": "$PRI",
+        "shortIds": ["$SID"]
       }
     }
   }],
-  "outbounds":[{
-    "protocol":"vless",
-    "settings":{
-      "vnext":[{
-        "address":"$V_ADDR",
-        "port":$V_PORT,
-        "users":[{
-          "id":"$V_UUID",
-          "flow":"$V_FLOW"
-        }]
+  "outbounds": [{
+    "protocol": "shadowsocks",
+    "settings": {
+      "servers": [{
+        "address": "$SS_ADDR",
+        "port": $SS_PORT,
+        "method": "$SS_METHOD",
+        "password": "$SS_PASS"
       }]
-    },
-    "streamSettings":{
-      "network":"tcp",
-      "security":"reality",
-      "realitySettings":{
-        "serverName":"$V_SNI",
-        "publicKey":"$V_PBK",
-        "shortId":"$V_SID",
-        "fingerprint":"$V_FP"
-      }
     }
   }]
 }
@@ -331,6 +327,8 @@ EOF
 
     echo "vless://$UUID@$(ip):$PORT?security=reality&encryption=none&pbk=$PBK&fp=chrome&flow=xtls-rprx-vision&sni=addons.mozilla.org&sid=$SID#$REMARK"
 }
+
+
 
 # ---------------- MODE 6 ----------------
 enable_bbr() {
@@ -391,13 +389,13 @@ check_root
 check_sys
 deps
 install_xray
-install_exray_cmd
+#install_exray_cmd
 
 echo "1) VLESS Reality Vision"
 echo "2) Shadowsocks"
 echo "3) Trojan"
 echo "4) Shadowsocks → VLESS Reality"
-echo "5) VLESS Reality → VLESS Reality"
+echo "5) VLESS Reality → Shadowsocks"
 echo "6) 开启 BBR 加速"
 echo "7) 重启 Xray"
 echo "8) 停止 Xray"
