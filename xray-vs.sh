@@ -210,7 +210,21 @@ EOF
 
     echo
     echo "Trojan Reality 分享链接："
-     echo "trojan://$PASSWORD@$(ip):$PORT?security=reality&sni=$SNI&pbk=$PUB_KEY&sid=$SHORT_ID&type=tcp#$REMARK"
+#    echo "trojan://$PASSWORD@$(ip):$PORT?security=reality&sni=$SNI&pbk=$PUB_KEY&sid=$SHORT_ID&type=tcp#$REMARK"
+    ENCODED_REMARK=$(printf '%s' "$REMARK" | jq -sRr @uri)
+ENCODED_SNI=$(printf '%s' "$SNI" | jq -sRr @uri)
+
+echo "trojan://$PASSWORD@$(ip):$PORT\
+?security=reality\
+&type=tcp\
+&sni=$ENCODED_SNI\
+&pbk=$PUB_KEY\
+&sid=$SHORT_ID\
+&flow=xtls-rprx-vision\
+&fp=chrome\
+&encryption=none\
+#$ENCODED_REMARK"
+
 }
 
 
