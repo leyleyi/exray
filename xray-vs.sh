@@ -359,7 +359,7 @@ echo "5) VLESS Reality → VLESS Reality"
 echo "6) 开启 BBR 加速"
 echo "7) 重启 Xray"
 echo "8) 卸载 Xray"
-echo "9) 退出"
+echo "0) 退出"
 read -rp "> " M
 
 
@@ -372,5 +372,5 @@ case "$M" in
     6) enable_bbr ;;
     7) service_restart ;;
     8) uninstall_xray ;;
-    9) exit 0 ;;
+    0) exit 0 ;;
 esac
