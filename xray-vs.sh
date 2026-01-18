@@ -167,9 +167,17 @@ EOF
 # ---------------- MODE 3 ----------------
 mode_trojan() {
     PORT=$(port)
-    PASSWORD=$(cat /proc/sys/kernel/random/uuid) || uuid=$(openssl rand -hex 16 | sed 's/\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)/\1\2\3\4-\5\6-\7\8-\9\10-\11\12\13\14\15\16/')
-    read -rp "请输入 SNI（默认 addons.mozilla.org）: " SNI
+
+    PASSWORD=$(cat /proc/sys/kernel/random/uuid || openssl rand -hex 16 | sed 's/\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)/\1\2\3\4-\5\6-\7\8-\9\10-\11\12\13\14\15\16/')
+
+    read -rp "请输入 Reality SNI（默认 addons.mozilla.org）: " SNI
     SNI=${SNI:-addons.mozilla.org}
+
+    KEYPAIR=$(xray x25519)
+    PRIVATE_KEY=$(echo "$KEYPAIR" | awk '/Private key/ {print $3}')
+    PUBLIC_KEY=$(echo "$KEYPAIR"  | awk '/Public key/  {print $3}')
+
+    SHORT_ID=$(openssl rand -hex 8)
 
 cat > "$CONFIG_FILE" <<EOF
 {
@@ -186,9 +194,14 @@ cat > "$CONFIG_FILE" <<EOF
       },
       "streamSettings": {
         "network": "tcp",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "$SNI"
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "dest": "$SNI:443",
+          "xver": 0,
+          "serverNames": ["$SNI"],
+          "privateKey": "$PRIVATE_KEY",
+          "shortIds": ["$SHORT_ID"]
         }
       }
     }
@@ -202,8 +215,8 @@ cat > "$CONFIG_FILE" <<EOF
 EOF
 
     echo
-    echo "Trojan 链接："
-    echo "trojan://$PASSWORD@$(ip):$PORT?sni=$SNI"
+    echo "Trojan Reality 分享链接："
+    echo "trojan://$PASSWORD@$(ip):$PORT?security=reality&sni=$SNI&pbk=$PUBLIC_KEY&sid=$SHORT_ID&type=tcp"
 }
 
 
