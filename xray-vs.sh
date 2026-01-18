@@ -5,7 +5,7 @@
 #   1. VLESS + Reality
 #   2. Shadowsocks 2022
 #   3. Shadowsocks 中转 → 出站 VLESS Reality
-# 最后更新：2025/2026 常用写法
+# 最后更新：基于2026常见写法，优化兼容性
 # =====================================================================
 
 set -euo pipefail
@@ -24,19 +24,19 @@ msg_error() { echo -e "\( {RED}[ERROR] \){NC} $*" >&2; }
 install_dependencies() {
     if [[ -f /etc/debian_version ]] || grep -qiE 'ubuntu|debian' /etc/os-release 2>/dev/null; then
         PKG_MANAGER="apt"
-        PKG_UPDATE="apt update -y"
+        PKG_UPDATE="apt update -y >/dev/null 2>&1"
         PKG_INSTALL="apt install -y"
     elif [[ -f /etc/alpine-release ]]; then
         PKG_MANAGER="apk"
-        PKG_UPDATE="apk update"
+        PKG_UPDATE="apk update >/dev/null 2>&1"
         PKG_INSTALL="apk add"
     elif grep -qiE 'centos|red hat|rocky|almalinux' /etc/os-release 2>/dev/null; then
         PKG_MANAGER="dnf_or_yum"
         if command -v dnf >/dev/null; then
-            PKG_UPDATE="dnf makecache -y"
+            PKG_UPDATE="dnf makecache -y >/dev/null 2>&1"
             PKG_INSTALL="dnf install -y"
         else
-            PKG_UPDATE="yum makecache -y"
+            PKG_UPDATE="yum makecache -y >/dev/null 2>&1"
             PKG_INSTALL="yum install -y"
         fi
     else
@@ -45,8 +45,8 @@ install_dependencies() {
     fi
 
     msg_info "正在更新软件源并安装必要工具..."
-    $PKG_UPDATE
-    $PKG_INSTALL curl unzip jq openssl ca-certificates
+    $PKG_UPDATE || true  # 忽略更新错误，继续
+    $PKG_INSTALL curl unzip jq openssl ca-certificates >/dev/null 2>&1 || msg_error "依赖安装失败，请检查网络或权限"
 }
 
 # ======================== 安装/更新 Xray =========================
@@ -57,16 +57,16 @@ install_xray() {
         bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
     else
         msg_info "Xray 已安装，正在尝试更新..."
-        bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --beta || true
+        bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
     fi
 
     # 确保目录存在
     mkdir -p /usr/local/etc/xray /usr/local/share/xray
     chmod 755 /usr/local/etc/xray
 
-    # 检查服务文件是否存在
-    if [[ ! -f /etc/systemd/system/xray.service ]]; then
-        msg_warn "systemd 服务文件未找到，尝试手动创建基本服务文件..."
+    # 检查服务文件是否存在（systemd优先）
+    if command -v systemctl >/dev/null && [[ ! -f /etc/systemd/system/xray.service ]]; then
+        msg_warn "systemd 服务文件未找到，尝试手动创建..."
         cat > /etc/systemd/system/xray.service <<'EOF'
 [Unit]
 Description=Xray Service
@@ -88,11 +88,11 @@ EOF
 # ======================== 生成 Reality 密钥对 =========================
 generate_reality_keypair() {
     local keys
-    keys=$(xray x25519 2>/dev/null || /usr/local/bin/xray x25519)
+    keys=$(/usr/local/bin/xray x25519)
     PRIVATE_KEY=$(echo "$keys" | grep "Private key:" | awk '{print $3}')
     PUBLIC_KEY=$(echo "$keys" | grep "Public key:" | awk '{print $3}')
     if [[ -z "$PRIVATE_KEY" || -z "$PUBLIC_KEY" ]]; then
-        msg_error "无法生成 Reality 密钥对"
+        msg_error "无法生成 Reality 密钥对，请检查 Xray 安装"
         exit 1
     fi
 }
@@ -104,7 +104,7 @@ mode_vless_reality() {
     [[ -z "$PORT" || -z "$SNI" ]] && { msg_error "端口和 SNI 不能为空"; exit 1; }
 
     generate_reality_keypair
-    UUID=$(xray uuid)
+    UUID=$(/usr/local/bin/xray uuid)
 
     cat > /usr/local/etc/xray/config.json <<EOF
 {
@@ -140,7 +140,7 @@ EOF
     echo -e "SNI        : ${GREEN}\( SNI \){NC}"
     echo -e "公钥       : ${GREEN}\( PUBLIC_KEY \){NC}"
     echo -e "分享链接示例:"
-    echo "vless://$UUID@YOUR_IP:$PORT?security=reality&sni=$SNI&fp=chrome&type=tcp&pbk=$PUBLIC_KEY#VLESS-Reality"
+    echo "vless://$UUID@YOUR_SERVER_IP:$PORT?security=reality&sni=$SNI&fp=chrome&type=tcp&pbk=$PUBLIC_KEY#VLESS-Reality"
 }
 
 # ======================== 模式 2：Shadowsocks 2022 =========================
@@ -170,7 +170,7 @@ EOF
     echo -e "端口     : ${GREEN}\( PORT \){NC}"
     echo -e "密码     : ${GREEN}\( PASSWORD \){NC}"
     echo -e "分享链接示例:"
-    echo "ss://2022-blake3-aes-128-gcm:$PASSWORD@YOUR_IP:$PORT#SS-2022"
+    echo "ss://2022-blake3-aes-128-gcm:$PASSWORD@YOUR_SERVER_IP:$PORT#SS-2022"
 }
 
 # ======================== 模式 3：SS 中转 → VLESS Reality =========================
@@ -179,15 +179,17 @@ mode_ss_relay() {
     read -r -p "请输入本地 Shadowsocks 监听端口: " LOCAL_PORT
     [[ -z "$VLESS_LINK" || -z "$LOCAL_PORT" ]] && { msg_error "链接和端口不能为空"; exit 1; }
 
-    # 简单解析 vless 链接（支持大多数标准格式）
-    UUID=$(echo "$VLESS_LINK" | sed -E 's#^vless://([^@]+)@.*#\1#')
-    ADDR_PORT=$(echo "$VLESS_LINK" | sed -E 's#^vless://[^@]+@(.*)(\?.*)?#\1#')
+    # 优化解析：处理带#的链接
+    VLESS_LINK_CLEAN=$(echo "$VLESS_LINK" | sed 's/#.*//')  # 移除#标签
+    UUID=$(echo "$VLESS_LINK_CLEAN" | sed -E 's#^vless://([^@]+)@.*#\1#')
+    ADDR_PORT=$(echo "$VLESS_LINK_CLEAN" | sed -E 's#^vless://[^@]+@(.*)(\?.*)?#\1#')
     ADDRESS=$(echo "$ADDR_PORT" | cut -d':' -f1)
     PORT=$(echo "$ADDR_PORT" | cut -d':' -f2)
-    QUERY=$(echo "$VLESS_LINK" | sed -E 's#.*\?(.*)#\1#')
-    SNI=$(echo "$QUERY" | grep -oP '(?<=sni=)[^&]+')
-    PBK=$(echo "$QUERY" | grep -oP '(?<=pbk=)[^&]+')
-    SID=$(echo "$QUERY" | grep -oP '(?<=sid=)[^&]+' || echo "")
+    QUERY=$(echo "$VLESS_LINK_CLEAN" | sed -E 's#.*\?(.*)#\1#')
+    SNI=$(echo "$QUERY" | sed -E 's/.*sni=([^&]*).*/\1/')
+    PBK=$(echo "$QUERY" | sed -E 's/.*pbk=([^&]*).*/\1/')
+    SID=$(echo "$QUERY" | sed -E 's/.*sid=([^&]*).*/\1/' || echo "")
+    FLOW=$(echo "$QUERY" | sed -E 's/.*flow=([^&]*).*/\1/' || echo "xtls-rprx-vision")
 
     PASSWORD=$(openssl rand -base64 16 | tr -d '/+=' | head -c 16)
 
@@ -210,7 +212,7 @@ mode_ss_relay() {
       "vnext": [{
         "address": "$ADDRESS",
         "port": $PORT,
-        "users": [{"id": "$UUID", "encryption": "none", "flow": "xtls-rprx-vision"}]
+        "users": [{"id": "$UUID", "encryption": "none", "flow": "$FLOW"}]
       }]
     },
     "streamSettings": {
@@ -250,7 +252,7 @@ EOF
 
 # ======================== 主逻辑 =========================
 clear
-echo -e "\( {GREEN}=== Xray 一键部署脚本（2025/2026 常用版） === \){NC}"
+echo -e "\( {GREEN}=== Xray 一键部署脚本（优化版） === \){NC}"
 echo "支持系统：Ubuntu/Debian/Alpine/CentOS/Rocky/Alma"
 
 install_dependencies
@@ -270,13 +272,28 @@ case $CHOICE in
     *) msg_error "无效选择"; exit 1 ;;
 esac
 
+# 测试配置合法性
+if ! /usr/local/bin/xray -test -config /usr/local/etc/xray/config.json >/dev/null 2>&1; then
+    msg_error "配置测试失败，请检查输入参数"
+    exit 1
+fi
+
 # 重启服务
-systemctl daemon-reload
-systemctl restart xray || { /usr/local/bin/xray run -c /usr/local/etc/xray/config.json & }
-systemctl enable xray 2>/dev/null || true
+if command -v systemctl >/dev/null; then
+    systemctl daemon-reload
+    systemctl restart xray
+    systemctl enable xray
+else
+    msg_warn "无 systemd，使用 nohup 后台运行"
+    pkill xray || true
+    nohup /usr/local/bin/xray run -c /usr/local/etc/xray/config.json >/var/log/xray.log 2>&1 &
+fi
 
 msg_info "配置完成！请检查服务状态："
-echo "  systemctl status xray"
-echo "  journalctl -u xray -n 30 -e"
+if command -v systemctl >/dev/null; then
+    systemctl status xray -l --no-pager
+else
+    ps aux | grep xray
+fi
 
-echo -e "\n\( {GREEN}祝使用愉快！ \){NC}"
+echo -e "\n\( {GREEN}祝使用愉快！如有问题，运行 journalctl -u xray -e 或 tail /var/log/xray.log \){NC}"
