@@ -167,24 +167,45 @@ EOF
 # ---------------- MODE 3 ----------------
 mode_trojan() {
     PORT=$(port)
-    PASSWORD=$(openssl rand -hex 16) # Trojan 密码通常是 32 位 hex
-cat > $CONFIG_FILE <<EOF
+    PASSWORD=$(cat /proc/sys/kernel/random/uuid) || uuid=$(openssl rand -hex 16 | sed 's/\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)\(..\)/\1\2\3\4-\5\6-\7\8-\9\10-\11\12\13\14\15\16/')
+    read -rp "请输入 SNI（默认 addons.mozilla.org）: " SNI
+    SNI=${SNI:-addons.mozilla.org}
+
+cat > "$CONFIG_FILE" <<EOF
 {
-  "inbounds":[
+  "inbounds": [
     {
       "port": $PORT,
       "protocol": "trojan",
       "settings": {
-        "clients": [{"password": "$PASSWORD"}]
+        "clients": [
+          {
+            "password": "$PASSWORD"
+          }
+        ]
       },
-      "streamSettings": {"network":"tcp"}
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "$SNI"
+        }
+      }
     }
   ],
-  "outbounds":[{"protocol":"freedom"}]
+  "outbounds": [
+    {
+      "protocol": "freedom"
+    }
+  ]
 }
 EOF
-    echo "trojan://$PASSWORD@$(ip):$PORT"
+
+    echo
+    echo "Trojan 链接："
+    echo "trojan://$PASSWORD@$(ip):$PORT?sni=$SNI"
 }
+
 
 # ---------------- MODE 4 ----------------
 mode_ss_relay() {
