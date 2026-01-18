@@ -176,7 +176,7 @@ mode_trojan() {
     read -rp "节点备注: " REMARK
     read -rp "请输入端口（回车随机）: " PORT
     PORT=${PORT:-$(port)}
-    PASSWORD=$(openssl rand -hex 8)
+    PASSWORD=$(uuid)
     KEYS=$($XRAY_BIN x25519)
     PRI=$(echo "$KEYS" | grep -i '^PrivateKey' | awk -F ': ' '{print $2}')
     PBK=$(echo "$KEYS" | grep -i '^Password'   | awk -F ': ' '{print $2}')
