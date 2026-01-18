@@ -55,14 +55,14 @@ install_xray() {
     rm -rf "$TMP"
 }
 
-# ---------------- 安装 exray 命令 ----------------
-install_exray_cmd() {
-    if [ ! -f "$SCRIPT_PATH" ]; then
-        cp "$0" "$SCRIPT_PATH"
-        chmod +x "$SCRIPT_PATH"
-        echo -e "${GREEN}已安装 exray 系统命令${PLAIN}"
-    fi
-}
+## ---------------- 安装 exray 命令 ----------------
+#install_exray_cmd() {
+#    if [ ! -f "$SCRIPT_PATH" ]; then
+#        cp "$0" "$SCRIPT_PATH"
+#        chmod +x "$SCRIPT_PATH"
+#        echo -e "${GREEN}已安装 exray 系统命令${PLAIN}"
+#    fi
+#}
 
 # ---------------- systemd ----------------
 service_start() {
@@ -210,7 +210,7 @@ EOF
 
     echo
     echo "Trojan Reality 分享链接："
-    echo "trojan://$PASSWORD@$(ip):$PORT?security=reality&sni=$SNI&pbk=$PUB_KEY&sid=$SHORT_ID&type=tcp&headerType=none#$REMARK"
+     echo "trojan://$PASSWORD@$(ip):$PORT?security=reality&sni=$SNI&pbk=$PUB_KEY&sid=$SHORT_ID&type=tcp#$REMARK"
 }
 
 
