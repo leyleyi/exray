@@ -1,113 +1,70 @@
 #!/bin/bash
 # =========================================================
-# Xray 终极修复版 - 2024 STABLE
-# 特性：
-# - 自动解析 VLESS Reality 链接
-# - 防止 Xray 重复安装
-# - Alpine / Debian / Ubuntu / CentOS 全兼容
-# - Shadowsocks 2022 / Reality 规范完全正确
+# Xray Ultimate Script - FINAL
+# Modes:
+# 1. VLESS Reality (xtls-rprx-vision)
+# 2. Shadowsocks Direct
+# 3. Shadowsocks Relay -> VLESS Reality (parse vless://)
 # =========================================================
 
-# ------------------ 颜色 ------------------
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 PLAIN='\033[0m'
 
-# ------------------ 变量 ------------------
-CONFIG_FILE="/usr/local/etc/xray/config.json"
 XRAY_BIN="/usr/local/bin/xray"
+CONFIG_FILE="/usr/local/etc/xray/config.json"
 
-# ------------------ 基础检查 ------------------
-check_root() {
-    [ "$EUID" -ne 0 ] && echo -e "${RED}必须使用 root 运行${PLAIN}" && exit 1
-}
+# ---------------- 基础 ----------------
+check_root(){ [ "$EUID" -ne 0 ] && exit 1; }
+check_sys(){ . /etc/os-release || exit 1; OS=$ID; }
 
-check_sys() {
-    . /etc/os-release || exit 1
-    OS=$ID
-}
-
-# ------------------ 依赖 ------------------
-install_dependencies() {
-    echo -e "${BLUE}安装依赖...${PLAIN}"
+deps() {
     case "$OS" in
         ubuntu|debian)
-            apt-get update -y
-            apt-get install -y curl wget jq openssl tar unzip ca-certificates
-            ;;
-        centos|rhel|fedora)
-            yum install -y curl wget jq openssl tar unzip ca-certificates
+            apt update -y
+            apt install -y curl wget jq unzip openssl ca-certificates
             ;;
         alpine)
-            apk add curl wget jq openssl tar unzip ca-certificates bash
-            ;;
-        *)
-            echo -e "${RED}不支持的系统${PLAIN}"
-            exit 1
+            apk add curl wget jq unzip openssl ca-certificates bash
             ;;
     esac
 }
 
-# ------------------ Xray ------------------
 install_xray() {
-    if [ -x "$XRAY_BIN" ]; then
-        echo -e "${GREEN}Xray 已存在，跳过安装${PLAIN}"
-        return
-    fi
-
-    echo -e "${BLUE}安装 Xray...${PLAIN}"
-    LATEST=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)
+    [ -x "$XRAY_BIN" ] && return
+    VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)
     ARCH=$(uname -m)
-
     case "$ARCH" in
         x86_64) A=64 ;;
         aarch64) A=arm64-v8a ;;
-        *) echo -e "${RED}不支持架构${PLAIN}"; exit 1 ;;
+        *) exit 1 ;;
     esac
-
     TMP=$(mktemp -d)
     wget -qO "$TMP/xray.zip" \
-        "https://github.com/XTLS/Xray-core/releases/download/${LATEST}/Xray-linux-${A}.zip"
-
+      "https://github.com/XTLS/Xray-core/releases/download/$VER/Xray-linux-$A.zip"
     unzip -q "$TMP/xray.zip" -d "$TMP"
-    install -m 755 "$TMP/xray" "$XRAY_BIN"
-    install -m 644 "$TMP/geoip.dat" "$TMP/geosite.dat" /usr/local/bin/
+    install -m755 "$TMP/xray" "$XRAY_BIN"
     mkdir -p /usr/local/etc/xray
     rm -rf "$TMP"
 }
 
-# ------------------ 工具 ------------------
-safe_base64() { base64 | tr -d '\n'; }
+ip(){ curl -s https://api.ipify.org || curl -s ifconfig.me; }
+port(){ shuf -i10000-60000 -n1 2>/dev/null || echo $((RANDOM%50000+10000)); }
+uuid(){ cat /proc/sys/kernel/random/uuid; }
 
-rand_port() {
-    shuf -i 10000-60000 -n 1 2>/dev/null || echo $((RANDOM%50000+10000))
-}
-
-rand_uuid() { cat /proc/sys/kernel/random/uuid; }
-
-get_ip() {
-    curl -s https://api.ipify.org || curl -s ifconfig.me
-}
-
-# ------------------ VLESS 解析 ------------------
+# ---------------- VLESS 解析 ----------------
 parse_vless() {
-    link=${1#*://}
-    link=${link%\#*}
-
-    V_UUID=${link%%@*}
-    rest=${link#*@}
-
-    addr=${rest%%\?*}
-    V_ADDR=${addr%%:*}
-    V_PORT=${addr##*:}
-
-    params=${rest#*\?}
+    l=${1#*://}; l=${l%\#*}
+    V_UUID=${l%%@*}
+    r=${l#*@}
+    ap=${r%%\?*}
+    V_ADDR=${ap%%:*}
+    V_PORT=${ap##*:}
     IFS='&'
-    for p in $params; do
-        k=${p%%=*}
-        v=${p#*=}
+    for i in ${r#*\?}; do
+        k=${i%%=*}; v=${i#*=}
         case "$k" in
             sni) V_SNI=$v ;;
             pbk) V_PBK=$v ;;
@@ -117,92 +74,23 @@ parse_vless() {
         esac
     done
     unset IFS
-
     [ -z "$V_SNI" ] && V_SNI="addons.mozilla.org"
     [ -z "$V_FP" ] && V_FP="chrome"
     [ -z "$V_SID" ] && V_SID=$(openssl rand -hex 4)
 }
 
-# ------------------ Relay ------------------
-configure_relay() {
-    read -rp "粘贴 vless:// 链接: " LINK
-    [[ "$LINK" != vless://* ]] && exit 1
-    parse_vless "$LINK"
-
-    echo -e "${GREEN}解析成功：$V_ADDR:$V_PORT${PLAIN}"
-
-    echo "1) SS 2022 (推荐)"
-    echo "2) SS aes-128-gcm"
-    read -rp "选择 [1]: " c
-
-    if [ "$c" = "2" ]; then
-        METHOD="aes-128-gcm"
-        PASS=$(openssl rand -hex 16)
-    else
-        METHOD="2022-blake3-aes-128-gcm"
-        PASS=$(openssl rand -base64 32)
-    fi
-
-    PORT=$(rand_port)
-
-    cat > "$CONFIG_FILE" <<EOF
-{
-  "log": { "loglevel": "warning" },
-  "inbounds": [{
-    "tag": "ss-in",
-    "port": $PORT,
-    "protocol": "shadowsocks",
-    "settings": {
-      "method": "$METHOD",
-      "password": "$PASS",
-      "network": "tcp,udp"
-    }
-  }],
-  "outbounds": [{
-    "tag": "proxy",
-    "protocol": "vless",
-    "settings": {
-      "vnext": [{
-        "address": "$V_ADDR",
-        "port": $V_PORT,
-        "users": [{
-          "id": "$V_UUID",
-          "encryption": "none",
-          "flow": "$V_FLOW"
-        }]
-      }]
-    },
-    "streamSettings": {
-      "network": "tcp",
-      "security": "reality",
-      "realitySettings": {
-        "serverName": "$V_SNI",
-        "publicKey": "$V_PBK",
-        "shortId": "$V_SID",
-        "fingerprint": "$V_FP"
-      }
-    },
-    "mux": { "enabled": false }
-  }]
-}
-EOF
-
-    SS=$(echo -n "$METHOD:$PASS" | safe_base64)
-    IP=$(get_ip)
-    echo -e "\n${GREEN}SS 分享链接：${PLAIN}"
-    echo "ss://${SS}@${IP}:${PORT}#Relay_${V_ADDR}"
-}
-
-# ------------------ Reality 本地 ------------------
-configure_local() {
-    PORT=$(rand_port)
-    UUID=$(rand_uuid)
+# =========================================================
+# MODE 1 : VLESS Reality xtls-rprx-vision
+# =========================================================
+mode_vless() {
+    PORT=$(port)
+    UUID=$(uuid)
     KEYS=$($XRAY_BIN x25519)
-    PRI=$(echo "$KEYS" | awk '/Private/{print $3}')
-    PUB=$(echo "$KEYS" | awk '/Public/{print $3}')
+    PRI=$(awk '/Private/{print $3}' <<<"$KEYS")
+    PUB=$(awk '/Public/{print $3}' <<<"$KEYS")
     SID=$(openssl rand -hex 4)
 
-    cat > "$CONFIG_FILE" <<EOF
+    cat > $CONFIG_FILE <<EOF
 {
   "inbounds":[{
     "port":$PORT,
@@ -226,17 +114,97 @@ configure_local() {
 }
 EOF
 
-    IP=$(get_ip)
-    echo -e "\n${GREEN}VLESS 链接：${PLAIN}"
-    echo "vless://$UUID@$IP:$PORT?security=reality&encryption=none&pbk=$PUB&fp=chrome&flow=xtls-rprx-vision&sni=addons.mozilla.org&sid=$SID"
+    echo -e "${GREEN}VLESS 链接：${PLAIN}"
+    echo "vless://$UUID@$(ip):$PORT?security=reality&encryption=none&pbk=$PUB&fp=chrome&flow=xtls-rprx-vision&sni=addons.mozilla.org&sid=$SID"
 }
 
-# ------------------ 服务 ------------------
-setup_service() {
-    if command -v systemctl >/dev/null; then
-        cat > /etc/systemd/system/xray.service <<EOF
+# =========================================================
+# MODE 2 : Shadowsocks Direct
+# =========================================================
+mode_ss() {
+    PORT=$(port)
+    PASS=$(openssl rand -base64 32)
+
+    cat > $CONFIG_FILE <<EOF
+{
+  "inbounds":[{
+    "tag":"ss-in",
+    "port":$PORT,
+    "protocol":"shadowsocks",
+    "settings":{
+      "method":"2022-blake3-aes-128-gcm",
+      "password":"$PASS",
+      "network":"tcp,udp"
+    }
+  }],
+  "outbounds":[{"protocol":"freedom"}]
+}
+EOF
+
+    SS=$(echo -n "2022-blake3-aes-128-gcm:$PASS" | base64 -w0)
+    echo "ss://$SS@$(ip):$PORT"
+}
+
+# =========================================================
+# MODE 3 : SS Relay -> VLESS Reality
+# =========================================================
+mode_relay() {
+    read -rp "输入 vless:// 链接: " LINK
+    parse_vless "$LINK"
+
+    PORT=$(port)
+    PASS=$(openssl rand -base64 32)
+
+    cat > $CONFIG_FILE <<EOF
+{
+  "inbounds":[{
+    "tag":"ss-in",
+    "port":$PORT,
+    "protocol":"shadowsocks",
+    "settings":{
+      "method":"2022-blake3-aes-128-gcm",
+      "password":"$PASS",
+      "network":"tcp,udp"
+    }
+  }],
+  "outbounds":[{
+    "tag":"proxy",
+    "protocol":"vless",
+    "settings":{
+      "vnext":[{
+        "address":"$V_ADDR",
+        "port":$V_PORT,
+        "users":[{
+          "id":"$V_UUID",
+          "encryption":"none",
+          "flow":"$V_FLOW"
+        }]
+      }]
+    },
+    "streamSettings":{
+      "network":"tcp",
+      "security":"reality",
+      "realitySettings":{
+        "serverName":"$V_SNI",
+        "publicKey":"$V_PBK",
+        "shortId":"$V_SID",
+        "fingerprint":"$V_FP"
+      }
+    },
+    "mux":{"enabled":false}
+  }]
+}
+EOF
+
+    SS=$(echo -n "2022-blake3-aes-128-gcm:$PASS" | base64 -w0)
+    echo -e "${GREEN}SS Relay 链接：${PLAIN}"
+    echo "ss://$SS@$(ip):$PORT"
+}
+
+# ---------------- 服务 ----------------
+service() {
+    cat > /etc/systemd/system/xray.service <<EOF
 [Unit]
-Description=Xray
 After=network.target
 [Service]
 ExecStart=$XRAY_BIN run -c $CONFIG_FILE
@@ -246,30 +214,28 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
-        systemctl daemon-reload
-        systemctl enable xray --now
-    else
-        rc-service xray restart
-    fi
+    systemctl daemon-reload
+    systemctl enable xray --now
 }
 
-# ------------------ MAIN ------------------
+# ================= MAIN =================
 check_root
 check_sys
-install_dependencies
+deps
 install_xray
 
-clear
-echo -e "${GREEN}Xray 高级配置${PLAIN}"
-echo "1) VLESS Reality 本机"
-echo "2) SS 中转 (VLESS → SS)"
-read -rp "选择: " M
+echo -e "${GREEN}选择模式:${PLAIN}"
+echo "1) VLESS Reality xtls"
+echo "2) Shadowsocks"
+echo "3) SS Relay → VLESS Reality"
+read -rp "> " M
 
 case "$M" in
-    1) configure_local ;;
-    2) configure_relay ;;
+    1) mode_vless ;;
+    2) mode_ss ;;
+    3) mode_relay ;;
     *) exit 1 ;;
 esac
 
-setup_service
-echo -e "${GREEN}完成，服务已启动${PLAIN}"
+service
+echo -e "${GREEN}完成${PLAIN}"
