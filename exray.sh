@@ -288,30 +288,46 @@ EOF
         echo -e "${RED}配置文件语法检查失败，请检查配置${PLAIN}"
     fi
 }
-
 # ---------------- Mode 2: Shadowsocks ----------------
 mode_ss() {
     read -rp "节点备注: " REMARK
     read -rp "请输入端口(回车随机10000-65535): " PORT
     PORT=${PORT:-$(port)}
 
+    # 显示加密方式选择菜单
     echo -e "${YELLOW}选择 Shadowsocks 加密方式：${PLAIN}"
-    echo "1) 2022-blake3-aes-128-gcm（默认）"
-    echo "2) chacha20-ietf-poly1305"
-    echo "3) aes-256-gcm"
-    echo "4) aes-128-gcm"
+    echo "1) 2022-blake3-aes-128-gcm（默认，需32字节密钥）"
+    echo "2) 2022-blake3-aes-256-gcm（需32字节密钥）"
+    echo "3) chacha20-ietf-poly1305"
+    echo "4) aes-256-gcm"
+    echo "5) aes-128-gcm"
 
-    read -rp "请输入选项 [1-4，回车=1]: " choice
+    # 直接读取用户选择
+    read -rp "请输入选项 [1-5，回车=1]: " choice
 
+    # 根据选择设置加密方式
     case "$choice" in
-        2) METHOD="chacha20-ietf-poly1305" ;;
-        3) METHOD="aes-256-gcm" ;;
-        4) METHOD="aes-128-gcm" ;;
+        2) METHOD="2022-blake3-aes-256-gcm" ;;
+        3) METHOD="chacha20-ietf-poly1305" ;;
+        4) METHOD="aes-256-gcm" ;;
+        5) METHOD="aes-128-gcm" ;;
         *) METHOD="2022-blake3-aes-128-gcm" ;;  # 默认
     esac
 
-    PASS=$(openssl rand -base64 16 | tr -d '\n\r=+/')
+    # 根据加密方式生成合适的密钥/密码
+    if [[ "$METHOD" == 2022-blake3-* ]]; then
+        # 2022系列需要32字节的base64编码密钥
+        echo -e "${YELLOW}注意：$METHOD 使用32字节密钥${PLAIN}"
+        PASS=$(openssl rand -base64 32 | tr -d '\n\r=+/' | cut -c1-43)  # 32字节base64
+        echo "生成的密钥: $PASS"
+        echo "密钥长度: ${#PASS}"
+    else
+        # 传统加密方式使用普通密码
+        PASS=$(openssl rand -base64 16 | tr -d '\n\r=+/')
+        echo "生成的密码: $PASS"
+    fi
 
+    # 生成配置
     cat > "$CONFIG_FILE" <<EOF
 {
   "inbounds":[{
@@ -328,14 +344,21 @@ mode_ss() {
 EOF
 
     echo -e "${GREEN}Shadowsocks ($METHOD) 配置已生成${PLAIN}"
+
+    # 生成 Shadowsocks 链接
     SS_BASE64=$(echo -n "$METHOD:$PASS" | base64 -w0)
     SS_LINK="ss://${SS_BASE64}@$(ip):$PORT#$REMARK"
     echo "$SS_LINK"
 
-    if $XRAY_BIN -test -config "$CONFIG_FILE" >/dev/null 2>&1; then
+    # 测试配置文件
+    echo -e "${YELLOW}正在检查配置文件语法...${PLAIN}"
+    TEST_OUTPUT=$($XRAY_BIN -test -config "$CONFIG_FILE" 2>&1)
+    if [ $? -eq 0 ]; then
         echo -e "${GREEN}配置文件语法检查通过${PLAIN}"
     else
         echo -e "${RED}配置文件语法检查失败，请检查配置${PLAIN}"
+        echo -e "${YELLOW}错误信息：${PLAIN}"
+        echo "$TEST_OUTPUT"
     fi
 }
 
@@ -406,21 +429,38 @@ mode_ss_relay() {
     read -rp "请输入本地端口(回车随机10000-65535): " PORT
     PORT=${PORT:-$(port)}
 
+    # 显示加密方式选择菜单
     echo -e "${YELLOW}选择 Shadowsocks 加密方式：${PLAIN}"
-    echo "1) 2022-blake3-aes-128-gcm（默认）"
-    echo "2) chacha20-ietf-poly1305"
-    echo "3) aes-256-gcm"
-    echo "4) aes-128-gcm"
-    read -rp "请输入选项 [1-4，回车=1]: " choice
+    echo "1) 2022-blake3-aes-128-gcm（默认，需32字节密钥）"
+    echo "2) 2022-blake3-aes-256-gcm（需32字节密钥）"
+    echo "3) chacha20-ietf-poly1305"
+    echo "4) aes-256-gcm"
+    echo "5) aes-128-gcm"
 
+    # 直接读取用户选择
+    read -rp "请输入选项 [1-5，回车=1]: " choice
+
+    # 根据选择设置加密方式
     case "$choice" in
-        2) METHOD="chacha20-ietf-poly1305" ;;
-        3) METHOD="aes-256-gcm" ;;
-        4) METHOD="aes-128-gcm" ;;
+        2) METHOD="2022-blake3-aes-256-gcm" ;;
+        3) METHOD="chacha20-ietf-poly1305" ;;
+        4) METHOD="aes-256-gcm" ;;
+        5) METHOD="aes-128-gcm" ;;
         *) METHOD="2022-blake3-aes-128-gcm" ;;  # 默认
     esac
 
-    PASS=$(openssl rand -base64 16 | tr -d '\n\r=+/')
+    # 根据加密方式生成合适的密钥/密码
+    if [[ "$METHOD" == 2022-blake3-* ]]; then
+        # 2022系列需要32字节的base64编码密钥
+        echo -e "${YELLOW}注意：$METHOD 使用32字节密钥${PLAIN}"
+        PASS=$(openssl rand -base64 32 | tr -d '\n\r=+/' | cut -c1-43)  # 32字节base64
+        echo "生成的密钥: $PASS"
+        echo "密钥长度: ${#PASS}"
+    else
+        # 传统加密方式使用普通密码
+        PASS=$(openssl rand -base64 16 | tr -d '\n\r=+/')
+        echo "生成的密码: $PASS"
+    fi
 
     cat > "$CONFIG_FILE" <<EOF
 {
@@ -461,24 +501,21 @@ mode_ss_relay() {
 EOF
 
     echo -e "${GREEN}SS → VLESS Relay 配置已生成${PLAIN}"
-    SS_LINK="ss://$(echo -n "$METHOD:$PASS" | base64 -w0)@$(ip):$PORT#$REMARK"
+
+    # 生成 Shadowsocks 链接
+    SS_BASE64=$(echo -n "$METHOD:$PASS" | base64 -w0)
+    SS_LINK="ss://${SS_BASE64}@$(ip):$PORT#$REMARK"
     echo "$SS_LINK"
 
-    if $XRAY_BIN -test -config "$CONFIG_FILE" >/dev/null 2>&1; then
+    # 测试配置文件
+    echo -e "${YELLOW}正在检查配置文件语法...${PLAIN}"
+    TEST_OUTPUT=$($XRAY_BIN -test -config "$CONFIG_FILE" 2>&1)
+    if [ $? -eq 0 ]; then
         echo -e "${GREEN}配置文件语法检查通过${PLAIN}"
     else
         echo -e "${RED}配置文件语法检查失败，请检查配置${PLAIN}"
-        echo -e "${YELLOW}调试信息:${PLAIN}"
-        echo "端口: $PORT"
-        echo "方法: $METHOD"
-        echo "密码: $PASS"
-        echo "目标地址: $V_ADDR:$V_PORT"
-        echo "UUID: $V_UUID"
-        echo "SNI: $V_SNI"
-        echo "PBK: $V_PBK"
-        echo "SID: $V_SID"
-        echo "FLOW: $V_FLOW"
-        echo "FP: $V_FP"
+        echo -e "${YELLOW}错误信息：${PLAIN}"
+        echo "$TEST_OUTPUT"
     fi
 }
 
