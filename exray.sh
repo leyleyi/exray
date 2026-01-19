@@ -294,8 +294,23 @@ mode_ss() {
     read -rp "节点备注: " REMARK
     read -rp "请输入端口(回车随机10000-65535): " PORT
     PORT=${PORT:-$(port)}
-    METHOD=$(choose_ss_method)
-    PASS=$(openssl rand -base64 16 | tr -d '\n\r')
+
+    echo -e "${YELLOW}选择 Shadowsocks 加密方式：${PLAIN}"
+    echo "1) 2022-blake3-aes-128-gcm（默认）"
+    echo "2) chacha20-ietf-poly1305"
+    echo "3) aes-256-gcm"
+    echo "4) aes-128-gcm"
+
+    read -rp "请输入选项 [1-4，回车=1]: " choice
+
+    case "$choice" in
+        2) METHOD="chacha20-ietf-poly1305" ;;
+        3) METHOD="aes-256-gcm" ;;
+        4) METHOD="aes-128-gcm" ;;
+        *) METHOD="2022-blake3-aes-128-gcm" ;;  # 默认
+    esac
+
+    PASS=$(openssl rand -base64 16 | tr -d '\n\r=+/')
 
     cat > "$CONFIG_FILE" <<EOF
 {
@@ -313,7 +328,9 @@ mode_ss() {
 EOF
 
     echo -e "${GREEN}Shadowsocks ($METHOD) 配置已生成${PLAIN}"
-    echo "ss://$(echo -n "$METHOD:$PASS" | base64 -w0)@$(ip):$PORT#$REMARK"
+    SS_BASE64=$(echo -n "$METHOD:$PASS" | base64 -w0)
+    SS_LINK="ss://${SS_BASE64}@$(ip):$PORT#$REMARK"
+    echo "$SS_LINK"
 
     if $XRAY_BIN -test -config "$CONFIG_FILE" >/dev/null 2>&1; then
         echo -e "${GREEN}配置文件语法检查通过${PLAIN}"
