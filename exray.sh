@@ -73,14 +73,6 @@ install_xray() {
     fi
 
     echo -e "${BLUE}正在下载最新 Xray...${PLAIN}"
-    read -rp "请输入Github代理(结尾带 /可留空)： " GITHUB_PROXY
-
-    GITHUB_PROXY=$(echo "$GITHUB_PROXY" | xargs)
-    if [ -n "$GITHUB_PROXY" ] && [[ ! "$GITHUB_PROXY" =~ /$ ]]; then
-        GITHUB_PROXY="${GITHUB_PROXY}/"
-    fi
-    # ───────────────────────────────────────────────────────────
-
     VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)
     [ -z "$VER" ] || [ "$VER" = "null" ] && { echo -e "${RED}获取版本失败${PLAIN}"; exit 1; }
 
@@ -92,19 +84,8 @@ install_xray() {
     esac
 
     TMP=$(mktemp -d)
-
-    DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/$VER/Xray-linux-$A.zip"
-    FULL_URL="${GITHUB_PROXY}${DOWNLOAD_URL}"
-
-    echo -e "${BLUE}下载地址：${FULL_URL}${PLAIN}"
-
-    wget -qO "$TMP/xray.zip" "$FULL_URL" || {
-        echo -e "${RED}下载失败${PLAIN}"
-        if [ -n "$GITHUB_PROXY" ]; then
-            echo -e "${YELLOW}提示：代理可能失效，可尝试回车不使用代理重试${PLAIN}"
-        fi
-        rm -rf "$TMP"
-        exit 1
+    wget -qO "$TMP/xray.zip" "https://github.com/XTLS/Xray-core/releases/download/$VER/Xray-linux-$A.zip" || {
+        echo -e "${RED}下载失败${PLAIN}"; rm -rf "$TMP"; exit 1;
     }
 
     unzip -q "$TMP/xray.zip" -d "$TMP" || { echo -e "${RED}解压失败${PLAIN}"; rm -rf "$TMP"; exit 1; }
@@ -343,7 +324,7 @@ EOF
 
 # ---------------- Mode 4: SS → VLESS Reality Relay ----------------
 mode_ss_relay() {
-    read -rp "输入VLESS链接: " LINK
+    read -rp "输入上游 VLESS 链接: " LINK
     parse_vless "$LINK"
     read -rp "节点备注: " REMARK
     read -rp "请输入本地端口(回车随机10000-65535): " PORT
@@ -389,86 +370,10 @@ mode_ss_relay() {
 }
 EOF
 
-    echo -e "${GREEN}SS → VLESS Relay 配置已生成${PLAIN}"
+    echo -e "${GREEN}SS → VLESS 中继 ($METHOD) 配置已生成${PLAIN}"
     echo "ss://$(echo -n "$METHOD:$PASS" | base64 -w0)@$(ip):$PORT#$REMARK"
 }
 
-# ---------------- Mode 5: VLESS Reality → SS 出站中继 ----------------
-mode_vless_to_ss() {
-    read -rp "请输入Shadowsocks链接:" SS_LINK
-    if [[ ! "$SS_LINK" =~ ^ss:// ]]; then
-        echo -e "${RED}输入的不是有效的Shadowsocks链接！${PLAIN}"
-        return 1
-    fi
-    SS_DECODE=$(echo "${SS_LINK#ss://}" | cut -d'@' -f1 | base64 -d 2>/dev/null)
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}无法解析Shadowsocks链接${PLAIN}"
-        return 1
-    fi
-
-    SS_METHOD_PASS="${SS_DECODE%@*}"
-    SS_METHOD="${SS_METHOD_PASS%%:*}"
-    SS_PASS="${SS_METHOD_PASS#*:}"
-    SS_HOST_PORT="${SS_LINK#*@}"
-    SS_HOST_PORT="${SS_HOST_PORT%%#*}"
-    SS_ADDR="${SS_HOST_PORT%%:*}"
-    SS_PORT="${SS_HOST_PORT##*:}"
-
-    if [[ -z "$SS_METHOD" || -z "$SS_PASS" || -z "$SS_ADDR" || -z "$SS_PORT" ]]; then
-        echo -e "${RED}Shadowsocks 链接解析失败，请检查格式${PLAIN}"
-        return 1
-    fi
-
-    read -rp "节点备注:" REMARK
-    read -rp "本地监听端口(回车随机10000-65535): " PORT
-    PORT=${PORT:-$(port)}
-
-    UUID=$(uuid)
-    KEYS=$($XRAY_BIN x25519)
-    PRI=$(echo "$KEYS" | grep -i '^PrivateKey' | awk -F ': ' '{print $2}')
-    PBK=$(echo "$KEYS" | grep -i '^PublicKey'   | awk -F ': ' '{print $2}')
-    SID=$(openssl rand -hex 4)
-
-    cat > "$CONFIG_FILE" <<EOF
-{
-  "inbounds": [{
-    "port": $PORT,
-    "protocol": "vless",
-    "settings": {
-      "clients": [{
-        "id": "$UUID",
-        "flow": "xtls-rprx-vision"
-      }],
-      "decryption": "none"
-    },
-    "streamSettings": {
-      "network": "tcp",
-      "security": "reality",
-      "realitySettings": {
-        "dest": "addons.mozilla.org:443",
-        "serverNames": ["addons.mozilla.org"],
-        "privateKey": "$PRI",
-        "shortIds": ["$SID"]
-      }
-    }
-  }],
-  "outbounds": [{
-    "protocol": "shadowsocks",
-    "settings": {
-      "servers": [{
-        "address": "$SS_ADDR",
-        "port": $SS_PORT,
-        "method": "$SS_METHOD",
-        "password": "$SS_PASS"
-      }]
-    }
-  }]
-}
-EOF
-
-    echo -e "${GREEN}VLESS Reality → SS 中继 配置已生成${PLAIN}"
-    echo "vless://$UUID@$(ip):$PORT?security=reality&encryption=none&pbk=$PBK&fp=chrome&flow=xtls-rprx-vision&sni=addons.mozilla.org&sid=$SID#$REMARK"
-}
 # ---------------- Other ----------------
 enable_bbr() {
     cat > /etc/sysctl.d/99-bbr.conf <<'EOF'
@@ -496,28 +401,26 @@ main_menu() {
         echo " 2) Shadowsocks"
         echo " 3) Trojan + Reality"
         echo " 4) SS → VLESS Reality 中继"
-        echo " 5) VLESS Reality → SS 中继"
-        echo " 6) 显示当前配置文件路径"
-        echo " 7) 开启 BBR 加速"
-        echo " 8) 重启 Xray 服务"
-        echo " 9) 停止 Xray 服务"
-        echo "10) 卸载 Xray"
+        echo " 5) 显示当前配置文件路径"
+        echo " 6) 开启 BBR 加速"
+        echo " 7) 重启 Xray 服务"
+        echo " 8) 停止 Xray 服务"
+        echo " 9) 卸载 Xray"
         echo " 0) 退出程序"
         echo -e "${BLUE}====================================${PLAIN}"
 
-        read -rp "请输入选项 [0-10]: " choice
+        read -rp "请输入选项 [0-9]: " choice
 
         case "$choice" in
             1) mode_vless; service_restart ;;
             2) mode_ss; service_restart ;;
             3) mode_trojan; service_restart ;;
             4) mode_ss_relay; service_restart ;;
-            # 5) ← 这里暂时没有任何功能实现（按需求只改菜单显示）
-            6) show_config_path ;;
-            7) enable_bbr ;;
-            8) service_restart ;;
-            9) stop_xray ;;
-            10) uninstall_xray; exit 0 ;;
+            5) show_config_path ;;
+            6) enable_bbr ;;
+            7) service_restart ;;
+            8) stop_xray ;;
+            9) uninstall_xray; exit 0 ;;
             0) exit 0 ;;
             *) echo -e "${RED}无效选项，请重新输入${PLAIN}" ;;
         esac
