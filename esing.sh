@@ -191,23 +191,6 @@ uninstall_singbox() {
 }
 
 # ---------------- 配置生成 ----------------
-generate_common_inbound() {
-    local type="$1" remark="$2" port="$3" extra="$4"
-    cat > "$CONFIG_FILE" <<EOF
-{
-  "log": {"level": "info"},
-  "inbounds": [{
-    "type": "$type",
-    "tag": "in",
-    "listen": "::",
-    "listen_port": $port,
-    $extra
-  }],
-  "outbounds": [{"type": "direct", "tag": "direct"}]
-}
-EOF
-}
-
 mode_vless_reality() {
     read -rp "节点备注: " REMARK
     read -rp "端口(回车随机): " PORT
@@ -218,17 +201,28 @@ mode_vless_reality() {
     PBK=$(echo "$KEYS" | grep PublicKey | awk '{print $2}' | tr -d '"')
     SHORTID=$(openssl rand -hex 4)
 
-    generate_common_inbound "vless" "$REMARK" "$PORT" "
-    \"users\": [{\"uuid\": \"$UUID\", \"flow\": \"xtls-rprx-vision\"}],
-    \"tls\": {
-      \"enabled\": true,
-      \"reality\": {
-        \"enabled\": true,
-        \"handshake\": {\"server\": \"addons.mozilla.org\", \"server_port\": 443},
-        \"private_key\": \"$PRI\",
-        \"short_id\": [\"$SHORTID\"]
+    cat > "$CONFIG_FILE" <<EOF
+{
+  "log": {"level": "info"},
+  "inbounds": [{
+    "type": "vless",
+    "tag": "in",
+    "listen": "::",
+    "listen_port": $PORT,
+    "users": [{"uuid": "$UUID", "flow": "xtls-rprx-vision"}],
+    "tls": {
+      "enabled": true,
+      "reality": {
+        "enabled": true,
+        "handshake": {"server": "addons.mozilla.org", "server_port": 443},
+        "private_key": "$PRI",
+        "short_id": ["$SHORTID"]
       }
-    }"
+    }
+  }],
+  "outbounds": [{"type": "direct", "tag": "direct"}]
+}
+EOF
 
     echo -e "${GREEN}VLESS Reality 配置完成${PLAIN}"
     echo "vless://$UUID@$(ip):$PORT?security=reality&pbk=$PBK&fp=chrome&flow=xtls-rprx-vision&sni=addons.mozilla.org&sid=$SHORTID#$REMARK"
@@ -263,9 +257,20 @@ mode_shadowsocks() {
         echo "密码: $PASS"
     fi
 
-    generate_common_inbound "shadowsocks" "$REMARK" "$PORT" "
-    \"method\": \"$METHOD\",
-    \"password\": \"$PASS\""
+    cat > "$CONFIG_FILE" <<EOF
+{
+  "log": {"level": "info"},
+  "inbounds": [{
+    "type": "shadowsocks",
+    "tag": "in",
+    "listen": "::",
+    "listen_port": $PORT,
+    "method": "$METHOD",
+    "password": "$PASS"
+  }],
+  "outbounds": [{"type": "direct", "tag": "direct"}]
+}
+EOF
 
     SS_B64=$(echo -n "$METHOD:$PASS" | base64 -w0)
     echo "ss://$SS_B64@$(ip):$PORT#$REMARK"
@@ -279,12 +284,23 @@ mode_trojan() {
     read -rp "SNI (默认 www.microsoft.com): " SNI
     SNI=${SNI:-www.microsoft.com}
 
-    generate_common_inbound "trojan" "$REMARK" "$PORT" "
-    \"users\": [{\"password\": \"$PASS\"}],
-    \"tls\": {
-      \"enabled\": true,
-      \"server_name\": \"$SNI\"
-    }"
+    cat > "$CONFIG_FILE" <<EOF
+{
+  "log": {"level": "info"},
+  "inbounds": [{
+    "type": "trojan",
+    "tag": "in",
+    "listen": "::",
+    "listen_port": $PORT,
+    "users": [{"password": "$PASS"}],
+    "tls": {
+      "enabled": true,
+      "server_name": "$SNI"
+    }
+  }],
+  "outbounds": [{"type": "direct", "tag": "direct"}]
+}
+EOF
 
     echo "trojan://$PASS@$(ip):$PORT?security=tls&sni=$SNI#$REMARK"
 }
@@ -296,13 +312,24 @@ mode_tuic() {
     UUID=$(uuid)
     PASS=$(openssl rand -base64 12 | tr -d '\n\r=+/')
 
-    generate_common_inbound "tuic" "$REMARK" "$PORT" "
-    \"users\": [{\"uuid\": \"$UUID\", \"password\": \"$PASS\"}],
-    \"congestion_control\": \"bbr\",
-    \"tls\": {
-      \"enabled\": true,
-      \"alpn\": [\"h3\"]
-    }"
+    cat > "$CONFIG_FILE" <<EOF
+{
+  "log": {"level": "info"},
+  "inbounds": [{
+    "type": "tuic",
+    "tag": "in",
+    "listen": "::",
+    "listen_port": $PORT,
+    "users": [{"uuid": "$UUID", "password": "$PASS"}],
+    "congestion_control": "bbr",
+    "tls": {
+      "enabled": true,
+      "alpn": ["h3"]
+    }
+  }],
+  "outbounds": [{"type": "direct", "tag": "direct"}]
+}
+EOF
 
     echo "tuic://$UUID:$PASS@$(ip):$PORT?congestion_control=bbr&sni=addons.mozilla.org#$REMARK"
 }
@@ -316,16 +343,38 @@ mode_hysteria2() {
     read -rp "是否启用 salamander 混淆？(y/n，回车=n): " obfs_choice
     if [[ "$obfs_choice" == "y" || "$obfs_choice" == "Y" ]]; then
         OBFS_PASS=$(openssl rand -base64 16 | tr -d '\n\r=+/')
-        OBFS="\"obfs\": {\"type\": \"salamander\", \"password\": \"$OBFS_PASS\"},"
+        cat > "$CONFIG_FILE" <<EOF
+{
+  "log": {"level": "info"},
+  "inbounds": [{
+    "type": "hysteria2",
+    "tag": "in",
+    "listen": "::",
+    "listen_port": $PORT,
+    "users": [{"password": "$PASS"}],
+    "obfs": {"type": "salamander", "password": "$OBFS_PASS"},
+    "tls": {"enabled": true}
+  }],
+  "outbounds": [{"type": "direct", "tag": "direct"}]
+}
+EOF
         echo "混淆密码: $OBFS_PASS"
     else
-        OBFS=""
+        cat > "$CONFIG_FILE" <<EOF
+{
+  "log": {"level": "info"},
+  "inbounds": [{
+    "type": "hysteria2",
+    "tag": "in",
+    "listen": "::",
+    "listen_port": $PORT,
+    "users": [{"password": "$PASS"}],
+    "tls": {"enabled": true}
+  }],
+  "outbounds": [{"type": "direct", "tag": "direct"}]
+}
+EOF
     fi
-
-    generate_common_inbound "hysteria2" "$REMARK" "$PORT" "
-    \"users\": [{\"password\": \"$PASS\"}],
-    $OBFS
-    \"tls\": {\"enabled\": true}"
 
     echo "hysteria2://$PASS@$(ip):$PORT/?sni=addons.mozilla.org#$REMARK"
 }
@@ -365,7 +414,19 @@ mode_socks() {
     read -rp "端口(回车随机): " PORT
     PORT=${PORT:-$(port)}
 
-    generate_common_inbound "socks" "$REMARK" "$PORT" "\"users\": []"
+    cat > "$CONFIG_FILE" <<EOF
+{
+  "log": {"level": "info"},
+  "inbounds": [{
+    "type": "socks",
+    "tag": "in",
+    "listen": "::",
+    "listen_port": $PORT,
+    "users": []
+  }],
+  "outbounds": [{"type": "direct", "tag": "direct"}]
+}
+EOF
 
     echo "socks5://$(ip):$PORT#$REMARK"
 }
