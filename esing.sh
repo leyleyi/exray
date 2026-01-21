@@ -459,7 +459,39 @@ mode_socks() {
     read -rp "端口(回车随机): " PORT
     PORT=${PORT:-$(port)}
 
-    cat > "$CONFIG_FILE" <<EOF
+    echo -e "${YELLOW}是否启用密码认证? (y/N):${PLAIN}"
+    read -rp "选择: " USE_AUTH
+
+    if [[ "$USE_AUTH" =~ ^[Yy]$ ]]; then
+        read -rp "用户名 (默认: user): " USERNAME
+        USERNAME=${USERNAME:-user}
+        read -rp "密码 (回车随机生成): " PASSWORD
+        if [ -z "$PASSWORD" ]; then
+            PASSWORD=$(openssl rand -hex 12)
+            echo -e "${GREEN}生成的密码: $PASSWORD${PLAIN}"
+        fi
+
+        cat > "$CONFIG_FILE" <<EOF
+{
+  "log": {"level": "info"},
+  "inbounds": [{
+    "type": "socks",
+    "tag": "in",
+    "listen": "::",
+    "listen_port": $PORT,
+    "users": [
+      {
+        "username": "$USERNAME",
+        "password": "$PASSWORD"
+      }
+    ]
+  }],
+  "outbounds": [{"type": "direct", "tag": "direct"}]
+}
+EOF
+        echo "socks5://$USERNAME:$PASSWORD@$(ip):$PORT#$REMARK"
+    else
+        cat > "$CONFIG_FILE" <<EOF
 {
   "log": {"level": "info"},
   "inbounds": [{
@@ -472,8 +504,8 @@ mode_socks() {
   "outbounds": [{"type": "direct", "tag": "direct"}]
 }
 EOF
-
-    echo "socks5://$(ip):$PORT#$REMARK"
+        echo "socks5://$(ip):$PORT#$REMARK"
+    fi
 }
 
 mode_ss_to_vless() {
@@ -483,13 +515,20 @@ mode_ss_to_vless() {
     HOST_PORT=$(echo "$LINK" | sed -n 's|.*@\([^?]*\).*|\1|p')
     ADDR=${HOST_PORT%%:*}
     RPORT=${HOST_PORT##*:}
-    PBK=$(echo "$LINK" | sed -n 's|.*pbk=\([^&]*\).*|\1|p')
-    SID=$(echo "$LINK" | sed -n 's|.*sid=\([^&]*\).*|\1|p')
-    SNI=$(echo "$LINK" | sed -n 's|.*sni=\([^&#]*\).*|\1|p')
+    PBK=$(echo "$LINK" | sed -n 's|.*[&?]pbk=\([^&]*\).*|\1|p')
+    SID=$(echo "$LINK" | sed -n 's|.*[&?]sid=\([^&]*\).*|\1|p')
+    SNI=$(echo "$LINK" | sed -n 's|.*[&?]sni=\([^&#]*\).*|\1|p')
+
+    # 如果没有提取到值，给出错误提示
+    if [ -z "$UUID" ] || [ -z "$ADDR" ] || [ -z "$PBK" ] || [ -z "$SNI" ]; then
+        echo -e "${RED}链接解析失败，请检查链接格式${PLAIN}"
+        return 1
+    fi
 
     read -rp "本地 Shadowsocks 监听端口(回车随机): " LOCAL_PORT
     LOCAL_PORT=${LOCAL_PORT:-$(port)}
     read -rp "节点备注: " REMARK
+    REMARK=${REMARK:-SS-to-VLESS}
 
     METHOD="2022-blake3-aes-128-gcm"
     PASS=$(random_base64_32)
@@ -518,6 +557,7 @@ cat > "$CONFIG_FILE" <<EOF
       "tls": {
         "enabled": true,
         "server_name": "$SNI",
+        "insecure": false,
         "reality": {
           "enabled": true,
           "public_key": "$PBK",
@@ -530,6 +570,9 @@ cat > "$CONFIG_FILE" <<EOF
 EOF
 
     SS_B64=$(echo -n "$METHOD:$PASS" | base64 -w0)
+    echo ""
+    echo -e "${GREEN}配置生成成功！${PLAIN}"
+    echo -e "${YELLOW}Shadowsocks 链接:${PLAIN}"
     echo "ss://$SS_B64@$(ip):$LOCAL_PORT#$REMARK"
 }
 
@@ -539,7 +582,13 @@ mode_vless_to_ss() {
 
     SS_CORE=${SS_LINK#ss://}
     SS_AUTH=${SS_CORE%@*}
-    SS_DECODE=$(echo "$SS_AUTH" | base64 -d)
+    SS_DECODE=$(echo "$SS_AUTH" | base64 -d 2>/dev/null)
+
+    if [ -z "$SS_DECODE" ]; then
+        echo -e "${RED}Shadowsocks 链接解析失败${PLAIN}"
+        return 1
+    fi
+
     METHOD=${SS_DECODE%%:*}
     PASS=${SS_DECODE#*:}
 
@@ -551,6 +600,7 @@ mode_vless_to_ss() {
     read -rp "本地 VLESS Reality 端口(回车随机): " LOCAL_PORT
     LOCAL_PORT=${LOCAL_PORT:-$(port)}
     read -rp "节点备注: " REMARK
+    REMARK=${REMARK:-VLESS-to-SS}
 
     UUID=$(uuid)
     KEYS=$($SING_BIN generate reality-keypair)
@@ -602,7 +652,10 @@ cat > "$CONFIG_FILE" <<EOF
 }
 EOF
 
-echo "vless://$UUID@$(ip):$LOCAL_PORT?encryption=none&security=reality&flow=xtls-rprx-vision&pbk=$PBK&sid=$SHORTID&sni=$SNI#$REMARK"
+    echo ""
+    echo -e "${GREEN}配置生成成功！${PLAIN}"
+    echo -e "${YELLOW}VLESS Reality 链接:${PLAIN}"
+    echo "vless://$UUID@$(ip):$LOCAL_PORT?encryption=none&security=reality&flow=xtls-rprx-vision&pbk=$PBK&sid=$SHORTID&sni=$SNI#$REMARK"
 }
 
 
