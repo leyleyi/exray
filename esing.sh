@@ -601,7 +601,8 @@ EOF
 }
 
 enable_bbr() {
-    cat > /etc/sysctl.d/99-bbr.conf <<'EOF'
+  #swappiness 5/10
+cat > /etc/sysctl.conf << EOF
 vm.swappiness = 5
 vm.dirty_ratio = 15
 vm.dirty_background_ratio = 5
@@ -627,6 +628,7 @@ vm.vfs_cache_pressure = 30
 kernel.sched_autogroup_enabled = 0
 kernel.numa_balancing = 0
 EOF
+sysctl -p && sysctl --system
     sysctl -p && sysctl --system
 
     echo -e "${GREEN}BBR 已启用(需重启系统生效)${PLAIN}"
