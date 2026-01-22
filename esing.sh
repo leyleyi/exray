@@ -403,10 +403,10 @@ EOF
 
 mode_trojan() {
     read -rp "节点备注: " REMARK
-    read -rp "端口(回车随机): " PORT
+    read -rp "端口(回车随机):" PORT
     PORT=${PORT:-$(port)}
     PASS=$(uuid)
-    read -rp "SNI (默认 www.microsoft.com): " SNI
+    read -rp "SNI(默认 www.microsoft.com):" SNI
     SNI=${SNI:-www.microsoft.com}
 
     generate_self_signed_cert "$SNI"
@@ -432,7 +432,7 @@ cat > "$CONFIG_FILE" <<EOF
 }
 EOF
 
-echo "trojan://$PASS@$(ip):$PORT?security=tls&sni=$SNI&allowInsecure=1#$REMARK"
+echo "trojan://$PASS@$(ip):$PORT?security=tls&sni=$SNI&insecure=1#$REMARK"
 }
 
 mode_tuic() {
@@ -470,7 +470,7 @@ cat > "$CONFIG_FILE" <<EOF
 }
 EOF
 
-echo "tuic://$UUID:$PASS@$(ip):$PORT?sni=$SNI&congestion_control=bbr&alpn=h3&allow_insecure=1#$REMARK"
+echo "tuic://$UUID:$PASS@$(ip):$PORT?sni=$SNI&congestion_control=bbr&alpn=h3&insecure=1#$REMARK"
 }
 
 mode_hysteria2() {
@@ -543,7 +543,7 @@ cat > "$CONFIG_FILE" <<EOF
 }
 EOF
 
-echo "anytls://$PASS@$(ip):$PORT?name=$USER&sni=$SNI&allowInsecure=1#$REMARK"
+echo "anytls://$PASS@$(ip):$PORT?name=$USER&sni=$SNI&insecure=1#$REMARK"
 }
 
 mode_socks() {
@@ -602,8 +602,30 @@ EOF
 
 enable_bbr() {
     cat > /etc/sysctl.d/99-bbr.conf <<'EOF'
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
+vm.swappiness = 10
+vm.dirty_ratio = 15
+vm.dirty_background_ratio = 5
+vm.overcommit_memory = 1
+vm.min_free_kbytes = 65536
+vm.overcommit_ratio = 100
+net.core.rmem_max = 67108864
+net.core.wmem_max = 67108864
+net.core.netdev_max_backlog = 500000
+net.core.somaxconn = 4096
+net.core.default_qdisc = fq
+net.ipv4.tcp_rmem = 4096 131070 67108864
+net.ipv4.tcp_wmem = 4096 16384 16777216
+net.ipv4.tcp_congestion_control = bbr
+net.ipv4.tcp_max_syn_backlog = 8192
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.ip_local_port_range = 1024 65535
+net.ipv4.tcp_pacing_ca_ratio = 110
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_sack = 1
+vm.vfs_cache_pressure = 30
+kernel.sched_autogroup_enabled = 0
+kernel.numa_balancing = 0
 EOF
     sysctl --system
     echo -e "${GREEN}BBR 已启用(需重启系统生效)${PLAIN}"
